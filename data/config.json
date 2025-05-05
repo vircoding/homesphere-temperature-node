@@ -1,4 +1,3 @@
 {
-  "mesh_ssid": "HomeSphere Mesh",
-  "mesh_password": "123456789"
+  "master_mac": "FF:FF:FF:FF:FF:FF"
 }

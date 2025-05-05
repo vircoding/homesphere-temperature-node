@@ -1,19 +1,18 @@
-#include "ButtonManager.hpp"
+#include "SyncButtonManager.hpp"
 
-ButtonManager::ButtonManager(uint8_t buttonPin) : _PIN(buttonPin) {}
+SyncButtonManager::SyncButtonManager(uint8_t buttonPin) : _PIN(buttonPin) {}
 
-void ButtonManager::begin() {
+void SyncButtonManager::begin() {
   _debouncer.attach(_PIN, INPUT_PULLUP);
   _debouncer.interval(DEBOUNCE_INTERVAL);
 }
 
-void ButtonManager::update() {
+void SyncButtonManager::update() {
   _debouncer.update();
 
   if (_debouncer.fell()) {
     _pressStartTime = millis();
     _longPressDetected = false;
-    Serial.println("Presionado - comenzando a medir el tiempo");
   }
 
   if (_debouncer.read() == LOW) {
@@ -32,18 +31,14 @@ void ButtonManager::update() {
     if (elapsed < LONG_PRESS_DURATION && !_longPressDetected) {
       _trigger(Event::SIMPLE_PRESS);
     }
-
-    Serial.print("Tiempo de pulsacion: ");
-    Serial.print(elapsed);
-    Serial.println("ms");
   }
 }
 
-void ButtonManager::on(Event event, std::function<void()> callback) {
+void SyncButtonManager::on(Event event, std::function<void()> callback) {
   _callbacks[event] = callback;
 }
 
-void ButtonManager::_trigger(Event event) {
+void SyncButtonManager::_trigger(Event event) {
   auto it = _callbacks.find(event);
 
   if (it != _callbacks.end() && it->second) {

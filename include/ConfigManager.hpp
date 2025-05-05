@@ -4,17 +4,13 @@
 
 class ConfigManager {
  public:
-  struct NetworkConfig {
-    String ssid;
-    String password;
-  };
-
   bool init();
-
-  NetworkConfig getMeshConfig() const { return _meshConfig; }
+  bool saveMasterMacConfig(const uint8_t* masterMac);
+  void copyMasterMac(uint8_t* macDest);
 
  private:
-  NetworkConfig _meshConfig;
+  uint8_t _masterMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
   bool _loadConfig();
+  bool _writeConfig(const JsonDocument& doc);
 };

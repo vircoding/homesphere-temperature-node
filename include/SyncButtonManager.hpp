@@ -5,20 +5,20 @@
 #include <functional>
 #include <map>
 
-class ButtonManager {
+class SyncButtonManager {
  public:
   enum class Event {
     SIMPLE_PRESS,
     LONG_PRESS,
   };
 
-  ButtonManager(uint8_t buttonPin);
+  SyncButtonManager(uint8_t buttonPin);
   void begin();
   void update();
   void on(Event event, std::function<void()> callback);
 
  private:
-  static constexpr uint16_t LONG_PRESS_DURATION = 5000;
+  static constexpr uint16_t LONG_PRESS_DURATION = 3000;
   static constexpr uint8_t DEBOUNCE_INTERVAL = 50;
 
   Bounce _debouncer;
