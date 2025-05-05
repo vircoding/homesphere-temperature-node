@@ -5,14 +5,14 @@
 #include <functional>
 #include <map>
 
-class ButtonManager {
+class SyncButtonManager {
  public:
   enum class Event {
     SIMPLE_PRESS,
     LONG_PRESS,
   };
 
-  ButtonManager(uint8_t buttonPin);
+  SyncButtonManager(uint8_t buttonPin);
   void begin();
   void update();
   void on(Event event, std::function<void()> callback);
