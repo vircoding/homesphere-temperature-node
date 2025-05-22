@@ -5,6 +5,8 @@
 
 class NowManager {
  public:
+  static constexpr uint32_t SYNC_MODE_TIMEOUT = 30000;
+
   enum class MessageType {
     SYNC_BROADCAST = 0x55,
     REGISTRATION = 0xAA,
@@ -39,9 +41,10 @@ class NowManager {
   };
 
   bool init();
+  bool stop();
+  bool reset();
+  bool registerBroadcastPeer();
   bool registerMasterPeer(const uint8_t* masterMac);
-  bool registerSyncPeer();
-  void setPMK(const String& key);
   void onSend(esp_now_send_cb_t callback);
   void unsuscribeOnSend();
   void onReceived(esp_now_recv_cb_t callback);
@@ -52,9 +55,10 @@ class NowManager {
   // bool sendTemperatureData(const float temp, const float hum);
 
  private:
-  static constexpr uint32_t SYNC_MODE_TIMEOUT = 30000;
-
+  uint8_t _broadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
   uint8_t _masterMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+  bool _isMasterPeerRegistered = false;
+  bool _isBroadcastPeerRegistered = false;
 
   static size_t _getMessageSize(MessageType type);
 };

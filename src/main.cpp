@@ -9,19 +9,26 @@
 #include "SyncButtonManager.hpp"
 #include "Utils.hpp"
 
+// Pinout
 const uint8_t dhtData = 4;
 const uint8_t ledPin = 2;
 const uint8_t syncButtonPin = 23;
 
+// Task Handlers
 TaskHandle_t blinkLEDTaskHandler = NULL;
 DHTManager::Data data;
 
+// Timer Handlers
+TimerHandle_t syncModeTimeoutTimerHandler = NULL;
+
+// Global variables
 ConfigManager config;
 IndicatorManager led(ledPin);
 SyncButtonManager syncButton(syncButtonPin);
 DHTManager dht(dhtData, data);
 NowManager now;
 
+// Definitions
 void onSendCallback(const uint8_t* mac_addr, esp_now_send_status_t status);
 void onSyncReceivedCallback(const uint8_t* mac, const uint8_t* data,
                             int length);
@@ -29,8 +36,11 @@ void onConfirmRegistrationReceivedCallback(const uint8_t* mac,
                                            const uint8_t* data, int length);
 void readSensorTask(void* parameter);
 void blinkLEDTask(void* parameter);
-void onSimpleButtonPressCallback();
-void onLongButtonPressCallback();
+void enterSyncMode();
+void endSyncMode();
+void onLongButtonPressCallback() { enterSyncMode(); };
+void onSimpleButtonPressCallback() { endSyncMode(); };
+void syncModeTimeoutCallback(TimerHandle_t xTimer) { endSyncMode(); };
 
 void setup() {
   Serial.begin(115200);
@@ -55,7 +65,7 @@ void setup() {
   syncButton.on(SyncButtonManager::Event::LONG_PRESS,
                 onLongButtonPressCallback);
 
-  // now.init();
+  now.init();
   // now.onSend(onSendCallback);
 
   // uint8_t masterMac[6];
@@ -91,8 +101,13 @@ void onSyncReceivedCallback(const uint8_t* mac, const uint8_t* data,
     if (verifyCRC8(*msg)) {
       // Registrar nuevo Master Peer y enviar mensaje de registro
       if (now.registerMasterPeer(mac) && now.sendRegistrationMsg()) {
-        now.unsuscribeOnReceived();
-        now.onReceived(onConfirmRegistrationReceivedCallback);
+        if (now.sendRegistrationMsg()) {
+          Serial.println("Mensaje Registration enviado");
+          now.unsuscribeOnReceived();
+          now.onReceived(onConfirmRegistrationReceivedCallback);
+        } else {
+          Serial.println("Error enviando el mensaje Registration");
+        }
       }
     } else {
       Serial.println("Error CRC8 inválido");
@@ -136,24 +151,42 @@ void blinkLEDTask(void* parameter) {
   }
 }
 
-void onLongButtonPressCallback() {
+void enterSyncMode() {
   if (blinkLEDTaskHandler == NULL) {
-    if (!now.init()) return;
+    if (!now.reset()) ESP.restart();
 
-    now.setPMK("SYNC_KEY");
-    if (!now.registerSyncPeer()) return;
+    if (!now.registerBroadcastPeer()) return;
 
     now.onReceived(onSyncReceivedCallback);
 
     xTaskCreatePinnedToCore(blinkLEDTask, "Blink LED", 2048, NULL, 2,
                             &blinkLEDTaskHandler, 1);
+
+    syncModeTimeoutTimerHandler = xTimerCreate(
+        "Sync Mode Timeout", pdMS_TO_TICKS(NowManager::SYNC_MODE_TIMEOUT),
+        pdFALSE, (void*)0,
+        syncModeTimeoutCallback);  // 30s
+
+    if (syncModeTimeoutTimerHandler != NULL)
+      xTimerStart(syncModeTimeoutTimerHandler, 0);
   }
 }
 
-void onSimpleButtonPressCallback() {
+void endSyncMode() {
+  // Detener el timer
+  xTimerStop(syncModeTimeoutTimerHandler, 0);
+
+  // Eliminar el timer y liberar memoria
+  if (xTimerDelete(syncModeTimeoutTimerHandler, 0) == pdPASS)
+    syncModeTimeoutTimerHandler =
+        NULL;  // Reasignar a NULL para evitar usos indebidos
+
   if (blinkLEDTaskHandler != NULL) {
     vTaskDelete(blinkLEDTaskHandler);
     blinkLEDTaskHandler = NULL;
     led.set(false);
   }
+
+  // Reiniciar ESP-NOW
+  if (!now.reset()) ESP.restart();
 }

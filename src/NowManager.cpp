@@ -13,6 +13,49 @@ bool NowManager::init() {
   return true;
 }
 
+bool NowManager::stop() {
+  if (reset() && esp_now_deinit() != ESP_OK) return false;
+
+  return true;
+}
+
+bool NowManager::reset() {
+  // Eliminar masterPeer si existe
+  if (_isMasterPeerRegistered) {
+    if (esp_now_del_peer(_masterMac) != ESP_OK) {
+      Serial.printf("Error eliminando peer %s\n",
+                    macToString(_masterMac).c_str());
+      return false;
+    }
+
+    _isMasterPeerRegistered = false;
+  }
+
+  // Eliminar el broadcast peer si existe
+  if (_isBroadcastPeerRegistered) {
+    if (esp_now_del_peer(_broadcastMac) != ESP_OK) {
+      Serial.printf("Error eliminando peer %s\n",
+                    macToString(_broadcastMac).c_str());
+      return false;
+    }
+
+    _isBroadcastPeerRegistered = false;
+  }
+
+  // Desregistrar callbacks
+  if (esp_now_unregister_recv_cb() != ESP_OK) {
+    Serial.println("Error desregistrando callback RX");
+    return false;
+  }
+
+  if (esp_now_unregister_send_cb() != ESP_OK) {
+    Serial.println("Error desregistrando callback TX");
+    return false;
+  }
+
+  return true;
+}
+
 void NowManager::onSend(esp_now_send_cb_t callback) {
   esp_now_register_send_cb(callback);
 }
@@ -77,14 +120,15 @@ bool NowManager::registerMasterPeer(const uint8_t* masterMac) {
 
   memcpy(_masterMac, masterMac, 6);
 
+  _isMasterPeerRegistered = true;
+
   return true;
 }
 
-bool NowManager::registerSyncPeer() {
-  const uint8_t broadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+bool NowManager::registerBroadcastPeer() {
   esp_now_peer_info_t peerInfo;
   memset(&peerInfo, 0, sizeof(peerInfo));
-  memcpy(peerInfo.peer_addr, broadcastMac, 6);
+  memcpy(peerInfo.peer_addr, _broadcastMac, 6);
   peerInfo.channel = 0;
   peerInfo.ifidx = WIFI_IF_STA;
   peerInfo.encrypt = false;
@@ -94,11 +138,8 @@ bool NowManager::registerSyncPeer() {
     return false;
   }
 
+  _isBroadcastPeerRegistered = true;
   return true;
-}
-
-void NowManager::setPMK(const String& key) {
-  esp_now_set_pmk((uint8_t*)key.c_str());
 }
 
 // bool NowManager::sendTemperatureData(const float temp, const float hum) {
