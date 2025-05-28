@@ -4,11 +4,11 @@
 class DHTManager {
  public:
   struct Data {
-    float hum;
-    float temp;
+    float hum = NAN;
+    float temp = NAN;
   };
 
-  DHTManager(uint8_t dataPin, Data& data);
+  DHTManager(const gpio_num_t dataPin, Data& data);
   void read();
 
  private:

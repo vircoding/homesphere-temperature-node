@@ -5,10 +5,7 @@
 #include "Utils.hpp"
 
 bool NowManager::init() {
-  if (esp_now_init() != ESP_OK) {
-    Serial.println("Error inicializando ESP-NOW");
-    return false;
-  }
+  if (esp_now_init() != ESP_OK) return false;
 
   return true;
 }
@@ -22,36 +19,22 @@ bool NowManager::stop() {
 bool NowManager::reset() {
   // Eliminar masterPeer si existe
   if (_isMasterPeerRegistered) {
-    if (esp_now_del_peer(_masterMac) != ESP_OK) {
-      Serial.printf("Error eliminando peer %s\n",
-                    macToString(_masterMac).c_str());
-      return false;
-    }
+    if (esp_now_del_peer(_masterMac) != ESP_OK) return false;
 
     _isMasterPeerRegistered = false;
   }
 
   // Eliminar el broadcast peer si existe
   if (_isBroadcastPeerRegistered) {
-    if (esp_now_del_peer(_broadcastMac) != ESP_OK) {
-      Serial.printf("Error eliminando peer %s\n",
-                    macToString(_broadcastMac).c_str());
-      return false;
-    }
+    if (esp_now_del_peer(_broadcastMac) != ESP_OK) return false;
 
     _isBroadcastPeerRegistered = false;
   }
 
   // Desregistrar callbacks
-  if (esp_now_unregister_recv_cb() != ESP_OK) {
-    Serial.println("Error desregistrando callback RX");
+  if (esp_now_unregister_recv_cb() != ESP_OK ||
+      esp_now_unregister_send_cb() != ESP_OK)
     return false;
-  }
-
-  if (esp_now_unregister_send_cb() != ESP_OK) {
-    Serial.println("Error desregistrando callback TX");
-    return false;
-  }
 
   return true;
 }
@@ -70,15 +53,19 @@ void NowManager::unsuscribeOnReceived() { esp_now_unregister_recv_cb(); }
 
 bool NowManager::sendRegistrationMsg() {
   NowManager::RegistrationMsg msg;
-  msg.nodeType = 0x1A;
-  msg.firmwareVersion[0] = 1;
-  msg.firmwareVersion[1] = 0;
-  msg.firmwareVersion[2] = 0;
+  msg.nodeType = NODE_TYPE;
+  msg.firmwareVersion[0] = FIRMWARE_VERSION[0];
+  msg.firmwareVersion[1] = FIRMWARE_VERSION[1];
+  msg.firmwareVersion[2] = FIRMWARE_VERSION[2];
 
   // Generate CRC8
   addCRC8(msg);
 
   return esp_now_send(_masterMac, (uint8_t*)&msg, sizeof(msg)) == ESP_OK;
+}
+
+bool NowManager::isMasterMac(const uint8_t* mac) {
+  return memcmp(_masterMac, mac, 6) == 0;
 }
 
 bool NowManager::validateMessage(MessageType expectedType, const uint8_t* data,
@@ -101,6 +88,9 @@ size_t NowManager::_getMessageSize(MessageType type) {
     case MessageType::CONFIRM_REGISTRATION:
       return sizeof(ConfirmRegistrationMsg);
 
+    case MessageType::PING:
+      return sizeof(PingMsg);
+
     default:
       return 0;  // Tipo desconocido
   }
@@ -113,10 +103,7 @@ bool NowManager::registerMasterPeer(const uint8_t* masterMac) {
   peerInfo.channel = 0;
   peerInfo.encrypt = false;
 
-  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
-    Serial.println("Error registrando peer");
-    return false;
-  }
+  if (esp_now_add_peer(&peerInfo) != ESP_OK) return false;
 
   memcpy(_masterMac, masterMac, 6);
 
@@ -133,32 +120,29 @@ bool NowManager::registerBroadcastPeer() {
   peerInfo.ifidx = WIFI_IF_STA;
   peerInfo.encrypt = false;
 
-  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
-    Serial.println("Error registrando peer");
-    return false;
-  }
+  if (esp_now_add_peer(&peerInfo) != ESP_OK) return false;
 
   _isBroadcastPeerRegistered = true;
   return true;
 }
 
-// bool NowManager::sendTemperatureData(const float temp, const float hum) {
-//   NowManager::TemperatureData data = {
-//     hum : hum,
-//     temp : temp,
-//     node_id : 2,
-//   };
+bool NowManager::sendDataMsg(const float temp, const float hum) {
+  if (!_isDataTransferEnabled) return false;
 
-//   // Enviar mensaje
-//   if (esp_now_send(_masterMac, (uint8_t*)&data, sizeof(data)) == ESP_OK) {
-//     Serial.print("Mensaje enviado a: ");
-//     Serial.println(macToString(_masterMac));
+  NowManager::TemperatureHumidityMsg msg;
+  msg.temp = temp;
+  msg.hum = hum;
 
-//     return true;
-//   } else {
-//     Serial.print("Error enviando mensaje a: ");
-//     Serial.println(macToString(_masterMac));
+  // Generate CRC8
+  addCRC8(msg);
 
-//     return false;
-//   }
-// }
+  return esp_now_send(_masterMac, (uint8_t*)&msg, sizeof(msg)) == ESP_OK;
+}
+
+void NowManager::setDataTransfer(const bool state) {
+  _isDataTransferEnabled = state;
+}
+
+void NowManager::setIsMasterConnected(const bool state) {
+  _isMasterConnected = state;
+}

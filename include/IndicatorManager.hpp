@@ -4,10 +4,10 @@
 
 class IndicatorManager {
  public:
-  IndicatorManager(const uint8_t ledPin);
+  IndicatorManager(const gpio_num_t ledPin);
   void begin();
   void set(const bool status);
 
  private:
-  const uint8_t _LED_PIN;
+  const gpio_num_t _LED_PIN;
 };

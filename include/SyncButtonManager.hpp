@@ -12,7 +12,7 @@ class SyncButtonManager {
     LONG_PRESS,
   };
 
-  SyncButtonManager(uint8_t buttonPin);
+  SyncButtonManager(const gpio_num_t buttonPin);
   void begin();
   void update();
   void on(Event event, std::function<void()> callback);
@@ -23,7 +23,7 @@ class SyncButtonManager {
 
   Bounce _debouncer;
 
-  const uint8_t _PIN;
+  const gpio_num_t _PIN;
   unsigned long _pressStartTime;
   bool _longPressDetected;
 
