@@ -16,12 +16,14 @@ const uint8_t syncButtonPin = 23;
 
 // Task Handlers
 TaskHandle_t blinkLEDTaskHandler = NULL;
-DHTManager::Data data;
+TaskHandle_t sendTemperatureHumidityTaskHandler = NULL;
 
 // Timer Handlers
 TimerHandle_t syncModeTimeoutTimerHandler = NULL;
 
 // Global variables
+DHTManager::Data data;
+
 ConfigManager config;
 IndicatorManager led(ledPin);
 SyncButtonManager syncButton(syncButtonPin);
@@ -35,16 +37,19 @@ void onSyncReceivedCallback(const uint8_t* mac, const uint8_t* data,
 void onConfirmRegistrationReceivedCallback(const uint8_t* mac,
                                            const uint8_t* data, int length);
 void readSensorTask(void* parameter);
+void sendTemperatureHumidityTask(void* parameter);
 void blinkLEDTask(void* parameter);
 void enterSyncMode();
 void endSyncMode();
 void onLongButtonPressCallback() { enterSyncMode(); };
 void onSimpleButtonPressCallback() { endSyncMode(); };
 void syncModeTimeoutCallback(TimerHandle_t xTimer) { endSyncMode(); };
+void enableSendTemperatureHumidity();
+void disableSendTemperatureHumidity();
+void registerMasterNode();
 
 void setup() {
   Serial.begin(115200);
-  Serial2.begin(115200);
 
   if (!config.init()) {
     ESP.restart();
@@ -65,24 +70,15 @@ void setup() {
   syncButton.on(SyncButtonManager::Event::LONG_PRESS,
                 onLongButtonPressCallback);
 
+  xTaskCreatePinnedToCore(readSensorTask, "Read Sensor", 4096, NULL, 1, NULL,
+                          0);
+
   now.init();
-  // now.onSend(onSendCallback);
-
-  // uint8_t masterMac[6];
-  // config.copyMasterMac(masterMac);
-  // now.registerMasterPeer(masterMac);
-
-  // xTaskCreatePinnedToCore(readSensorTask, "Read Sensor", 4096, NULL, 1, NULL,
-  //                         0);
+  now.onSend(onSendCallback);
+  registerMasterNode();
 }
 
-void loop() {
-  syncButton.update();
-
-  if (Serial2.available()) {
-    Serial.write(Serial2.read());
-  }
-}
+void loop() { syncButton.update(); }
 
 void onSendCallback(const uint8_t* mac_addr, esp_now_send_status_t status) {
   Serial.print("Estado de envío a ");
@@ -134,10 +130,18 @@ void readSensorTask(void* parameter) {
     Serial.printf("Temperatura: %fC\n", data.temp);
     Serial.printf("Humedad: %f%\n", data.hum);
 
-    // Send data to master
-    // now.sendTemperatureData(data.temp, data.hum);
-
     vTaskDelay(pdMS_TO_TICKS(2000));
+  }
+}
+
+void sendTemperatureHumidityTask(void* parameter) {
+  while (1) {
+    if (now.sendTemperatureHumidityMsg(data.temp, data.hum)) {
+      Serial.println("Mensaje TemperatureHumidity enviado");
+    } else
+      Serial.println("Error enviando el mensaje TemperatureHumidity");
+
+    vTaskDelay(pdMS_TO_TICKS(5000));  // 5s
   }
 }
 
@@ -153,6 +157,8 @@ void blinkLEDTask(void* parameter) {
 
 void enterSyncMode() {
   if (blinkLEDTaskHandler == NULL) {
+    disableSendTemperatureHumidity();
+
     if (!now.reset()) ESP.restart();
 
     if (!now.registerBroadcastPeer()) return;
@@ -189,4 +195,35 @@ void endSyncMode() {
 
   // Reiniciar ESP-NOW
   if (!now.reset()) ESP.restart();
+
+  registerMasterNode();
+  enableSendTemperatureHumidity();
+}
+
+void enableSendTemperatureHumidity() {
+  if (sendTemperatureHumidityTaskHandler == NULL) {
+    xTaskCreatePinnedToCore(sendTemperatureHumidityTask,
+                            "Send Temperature - Humidity", 2048, NULL, 2,
+                            &sendTemperatureHumidityTaskHandler, 1);
+  }
+}
+
+void disableSendTemperatureHumidity() {
+  if (sendTemperatureHumidityTaskHandler != NULL) {
+    vTaskDelete(sendTemperatureHumidityTaskHandler);
+    sendTemperatureHumidityTaskHandler = NULL;
+  }
+}
+
+void registerMasterNode() {
+  uint8_t masterMac[6];
+  config.copyMasterMac(masterMac);
+  if (now.registerMasterPeer(masterMac)) {
+    Serial.printf("Master peer vinculado: %s\n",
+                  macToString(masterMac).c_str());
+
+    enableSendTemperatureHumidity();
+  } else {
+    Serial.println("Error vinculando master peer");
+  }
 }

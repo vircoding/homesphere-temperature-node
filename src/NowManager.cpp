@@ -142,23 +142,13 @@ bool NowManager::registerBroadcastPeer() {
   return true;
 }
 
-// bool NowManager::sendTemperatureData(const float temp, const float hum) {
-//   NowManager::TemperatureData data = {
-//     hum : hum,
-//     temp : temp,
-//     node_id : 2,
-//   };
+bool NowManager::sendTemperatureHumidityMsg(const float temp, const float hum) {
+  NowManager::TemperatureHumidityMsg msg;
+  msg.temp = temp;
+  msg.hum = hum;
 
-//   // Enviar mensaje
-//   if (esp_now_send(_masterMac, (uint8_t*)&data, sizeof(data)) == ESP_OK) {
-//     Serial.print("Mensaje enviado a: ");
-//     Serial.println(macToString(_masterMac));
+  // Generate CRC8
+  addCRC8(msg);
 
-//     return true;
-//   } else {
-//     Serial.print("Error enviando mensaje a: ");
-//     Serial.println(macToString(_masterMac));
-
-//     return false;
-//   }
-// }
+  return esp_now_send(_masterMac, (uint8_t*)&msg, sizeof(msg)) == ESP_OK;
+}
