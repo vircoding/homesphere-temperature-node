@@ -1,6 +1,7 @@
 #include "SyncButtonManager.hpp"
 
-SyncButtonManager::SyncButtonManager(uint8_t buttonPin) : _PIN(buttonPin) {}
+SyncButtonManager::SyncButtonManager(const gpio_num_t buttonPin)
+    : _PIN(buttonPin) {}
 
 void SyncButtonManager::begin() {
   _debouncer.attach(_PIN, INPUT_PULLUP);

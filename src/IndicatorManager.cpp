@@ -1,10 +1,11 @@
 #include "IndicatorManager.hpp"
 
-IndicatorManager::IndicatorManager(const uint8_t ledPin) : _LED_PIN(ledPin) {}
+IndicatorManager::IndicatorManager(const gpio_num_t ledPin)
+    : _LED_PIN(ledPin) {}
 
 void IndicatorManager::begin() {
   pinMode(_LED_PIN, OUTPUT);
-  this->set(false);
+  set(false);
 }
 
 void IndicatorManager::set(const bool status) {

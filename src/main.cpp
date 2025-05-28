@@ -10,18 +10,21 @@
 #include "Utils.hpp"
 
 // Pinout
-const uint8_t dhtData = 4;
-const uint8_t ledPin = 2;
-const uint8_t syncButtonPin = 23;
+const gpio_num_t dhtData = GPIO_NUM_4;
+const gpio_num_t ledPin = GPIO_NUM_2;
+const gpio_num_t syncButtonPin = GPIO_NUM_23;
 
 // Task Handlers
 TaskHandle_t blinkLEDTaskHandler = NULL;
-DHTManager::Data data;
+TaskHandle_t sendDataTaskHandler = NULL;
 
 // Timer Handlers
 TimerHandle_t syncModeTimeoutTimerHandler = NULL;
 
 // Global variables
+bool syncModeState = false;
+DHTManager::Data data;
+
 ConfigManager config;
 IndicatorManager led(ledPin);
 SyncButtonManager syncButton(syncButtonPin);
@@ -29,31 +32,28 @@ DHTManager dht(dhtData, data);
 NowManager now;
 
 // Definitions
-void onSendCallback(const uint8_t* mac_addr, esp_now_send_status_t status);
 void onSyncReceivedCallback(const uint8_t* mac, const uint8_t* data,
                             int length);
 void onConfirmRegistrationReceivedCallback(const uint8_t* mac,
                                            const uint8_t* data, int length);
 void readSensorTask(void* parameter);
+void sendDataTask(void* parameter);
 void blinkLEDTask(void* parameter);
 void enterSyncMode();
 void endSyncMode();
 void onLongButtonPressCallback() { enterSyncMode(); };
 void onSimpleButtonPressCallback() { endSyncMode(); };
 void syncModeTimeoutCallback(TimerHandle_t xTimer) { endSyncMode(); };
+void enableDataTransfer();
+void disableDataTransfer();
+void registerMasterNode();
 
 void setup() {
   Serial.begin(115200);
-  Serial2.begin(115200);
 
   if (!config.init()) {
     ESP.restart();
   }
-
-  uint8_t mac[6];
-  config.copyMasterMac(mac);
-  Serial.print("Master MAC en config: ");
-  Serial.println(macToString(mac));
 
   WiFi.mode(WIFI_MODE_STA);
 
@@ -65,31 +65,14 @@ void setup() {
   syncButton.on(SyncButtonManager::Event::LONG_PRESS,
                 onLongButtonPressCallback);
 
+  xTaskCreatePinnedToCore(readSensorTask, "Read Sensor", 4096, NULL, 1, NULL,
+                          0);
+
   now.init();
-  // now.onSend(onSendCallback);
-
-  // uint8_t masterMac[6];
-  // config.copyMasterMac(masterMac);
-  // now.registerMasterPeer(masterMac);
-
-  // xTaskCreatePinnedToCore(readSensorTask, "Read Sensor", 4096, NULL, 1, NULL,
-  //                         0);
+  registerMasterNode();
 }
 
-void loop() {
-  syncButton.update();
-
-  if (Serial2.available()) {
-    Serial.write(Serial2.read());
-  }
-}
-
-void onSendCallback(const uint8_t* mac_addr, esp_now_send_status_t status) {
-  Serial.print("Estado de envío a ");
-  Serial.println(macToString(mac_addr).c_str());
-  Serial.println(status == ESP_NOW_SEND_SUCCESS ? " -> Entregado"
-                                                : " -> Fallo");
-}
+void loop() { syncButton.update(); }
 
 void onSyncReceivedCallback(const uint8_t* mac, const uint8_t* data,
                             int length) {
@@ -102,15 +85,10 @@ void onSyncReceivedCallback(const uint8_t* mac, const uint8_t* data,
       // Registrar nuevo Master Peer y enviar mensaje de registro
       if (now.registerMasterPeer(mac) && now.sendRegistrationMsg()) {
         if (now.sendRegistrationMsg()) {
-          Serial.println("Mensaje Registration enviado");
           now.unsuscribeOnReceived();
           now.onReceived(onConfirmRegistrationReceivedCallback);
-        } else {
-          Serial.println("Error enviando el mensaje Registration");
         }
       }
-    } else {
-      Serial.println("Error CRC8 inválido");
     }
   }
 }
@@ -128,16 +106,16 @@ void onConfirmRegistrationReceivedCallback(const uint8_t* mac,
 void readSensorTask(void* parameter) {
   while (1) {
     dht.read();
-    vTaskDelay(pdMS_TO_TICKS(10));
-
-    // Print data
-    Serial.printf("Temperatura: %fC\n", data.temp);
-    Serial.printf("Humedad: %f%\n", data.hum);
-
-    // Send data to master
-    // now.sendTemperatureData(data.temp, data.hum);
 
     vTaskDelay(pdMS_TO_TICKS(2000));
+  }
+}
+
+void sendDataTask(void* parameter) {
+  while (1) {
+    now.sendDataMsg(data.temp, data.hum);
+
+    vTaskDelay(pdMS_TO_TICKS(5000));  // 5s
   }
 }
 
@@ -152,15 +130,19 @@ void blinkLEDTask(void* parameter) {
 }
 
 void enterSyncMode() {
-  if (blinkLEDTaskHandler == NULL) {
+  if (!syncModeState) {
+    disableDataTransfer();
+
     if (!now.reset()) ESP.restart();
 
     if (!now.registerBroadcastPeer()) return;
 
     now.onReceived(onSyncReceivedCallback);
 
-    xTaskCreatePinnedToCore(blinkLEDTask, "Blink LED", 2048, NULL, 2,
-                            &blinkLEDTaskHandler, 1);
+    if (blinkLEDTaskHandler == NULL) {
+      xTaskCreatePinnedToCore(blinkLEDTask, "Blink LED", 2048, NULL, 2,
+                              &blinkLEDTaskHandler, 1);
+    }
 
     syncModeTimeoutTimerHandler = xTimerCreate(
         "Sync Mode Timeout", pdMS_TO_TICKS(NowManager::SYNC_MODE_TIMEOUT),
@@ -169,24 +151,52 @@ void enterSyncMode() {
 
     if (syncModeTimeoutTimerHandler != NULL)
       xTimerStart(syncModeTimeoutTimerHandler, 0);
+
+    syncModeState = true;
   }
 }
 
 void endSyncMode() {
-  // Detener el timer
-  xTimerStop(syncModeTimeoutTimerHandler, 0);
+  if (syncModeState) {
+    // Detener el timer
+    xTimerStop(syncModeTimeoutTimerHandler, 0);
 
-  // Eliminar el timer y liberar memoria
-  if (xTimerDelete(syncModeTimeoutTimerHandler, 0) == pdPASS)
-    syncModeTimeoutTimerHandler =
-        NULL;  // Reasignar a NULL para evitar usos indebidos
+    // Eliminar el timer y liberar memoria
+    if (xTimerDelete(syncModeTimeoutTimerHandler, 0) == pdPASS)
+      syncModeTimeoutTimerHandler =
+          NULL;  // Reasignar a NULL para evitar usos indebidos
 
-  if (blinkLEDTaskHandler != NULL) {
-    vTaskDelete(blinkLEDTaskHandler);
-    blinkLEDTaskHandler = NULL;
-    led.set(false);
+    if (blinkLEDTaskHandler != NULL) {
+      vTaskDelete(blinkLEDTaskHandler);
+      blinkLEDTaskHandler = NULL;
+      led.set(false);
+    }
+
+    // Reiniciar ESP-NOW
+    if (!now.reset()) ESP.restart();
+
+    registerMasterNode();
+
+    syncModeState = false;
   }
+}
 
-  // Reiniciar ESP-NOW
-  if (!now.reset()) ESP.restart();
+void enableDataTransfer() {
+  if (sendDataTaskHandler == NULL) {
+    xTaskCreatePinnedToCore(sendDataTask, "Send Temperature - Humidity", 2048,
+                            NULL, 2, &sendDataTaskHandler, 1);
+  }
+}
+
+void disableDataTransfer() {
+  if (sendDataTaskHandler != NULL) {
+    vTaskDelete(sendDataTaskHandler);
+    sendDataTaskHandler = NULL;
+  }
+}
+
+void registerMasterNode() {
+  uint8_t masterMac[6];
+  config.copyMasterMac(masterMac);
+  if (now.registerMasterPeer(masterMac)) enableDataTransfer();
 }
